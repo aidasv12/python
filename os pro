@@ -1,0 +1,108 @@
+import os
+import tkinter as tk
+from tkinter import ttk
+
+def get_cpu_info():
+    model_name = ""
+    cpu_cores = 0
+    freq = ""
+    with open("/proc/cpuinfo") as f:
+        for line in f:
+            if "model name" in line and not model_name:
+                model_name = line.strip().split(":")[1].strip()
+            if "cpu MHz" in line and not freq:
+                freq = line.strip().split(":")[1].strip() + " MHz"
+            if line.startswith("processor"):
+                cpu_cores += 1
+    return model_name, cpu_cores, freq
+
+def get_memory_info():
+    mem_total = 0
+    mem_free = 0
+    with open("/proc/meminfo") as f:
+        for line in f:
+            if "MemTotal" in line:
+                mem_total = int(line.split()[1]) // 1024  # MB
+            elif "MemFree" in line:
+                mem_free = int(line.split()[1]) // 1024  # MB
+    return mem_total, mem_free
+
+def get_cpu_temp():
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            temp_milli = int(f.read().strip())
+            return temp_milli / 1000.0  # Convert to Celsius
+    except:
+        return None
+
+def get_top_processes():
+    processes = []
+    for pid in filter(str.isdigit, os.listdir('/proc')):
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                data = f.read().split()
+                name = data[1].strip("()")
+                cpu_time = int(data[13]) + int(data[14])  # utime + stime
+                processes.append((name, cpu_time))
+        except:
+            continue
+    top = sorted(processes, key=lambda x: x[1], reverse=True)[:5]
+    return top
+
+def update_info():
+    cpu_model, cores, freq = get_cpu_info()
+    total_mem, free_mem = get_memory_info()
+    top_procs = get_top_processes()
+    cpu_temp = get_cpu_temp()
+
+    cpu_label.config(text=f"CPU: {cpu_model}\nCores: {cores}, Freq: {freq}")
+    mem_label.config(text=f"Memory: {total_mem} MB total / {free_mem} MB free")
+
+    if cpu_temp is not None:
+        temp_label.config(text=f"CPU Temperature: {cpu_temp:.1f}°C")
+    else:
+        temp_label.config(text="CPU Temperature: Not available")
+
+    # Warnings
+    warning = ""
+    if free_mem / total_mem < 0.2:
+        warning += "⚠️ Low free memory (< 20%)\n"
+    if any(cpu > 5000 for _, cpu in top_procs):
+        warning += "⚠️ Some processes are consuming high CPU!"
+    warning_label.config(text=warning)
+
+    proc_list.delete(0, tk.END)
+    for name, cpu in top_procs:
+        proc_list.insert(tk.END, f"{name}: {cpu} ticks")
+
+# GUI setup
+root = tk.Tk()
+root.title("System Monitor (/proc)")
+root.geometry("520x450")
+root.configure(bg="#f6e6fa")  # Lilac background
+
+style = ttk.Style()
+style.configure("TLabel", background="#f6e6fa")
+style.configure("TButton", background="#e0c9f0")
+
+cpu_label = ttk.Label(root, text="Loading CPU info...", justify="left")
+cpu_label.pack(pady=10)
+
+mem_label = ttk.Label(root, text="Loading memory info...", justify="left")
+mem_label.pack(pady=5)
+
+temp_label = ttk.Label(root, text="Loading temperature...", justify="left")
+temp_label.pack(pady=5)
+
+warning_label = ttk.Label(root, text="", foreground="red", background="#f6e6fa", justify="left")
+warning_label.pack(pady=5)
+
+ttk.Label(root, text="Top 5 CPU-consuming processes:").pack()
+proc_list = tk.Listbox(root, height=5, width=50)
+proc_list.pack(pady=5)
+
+refresh_button = ttk.Button(root, text="Refresh", command=update_info)
+refresh_button.pack(pady=15)
+
+update_info()
+root.mainloop()
